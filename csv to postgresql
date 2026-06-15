@@ -1,0 +1,174 @@
+"""
+Folder of CSVs -> PostgreSQL loader
+-----------------------------------
+Walks a folder (and, by default, its subfolders) and loads every .csv file
+into your PostgreSQL database as its own table. This is the Postgres version
+of your folder_to_sqlite loader.
+
+- Table names come from each file's path relative to ROOT_FOLDER, flattened
+  (e.g. logistics\units.csv -> logistics_units), so two files with the same
+  name in different subfolders don't overwrite each other.
+- Every row gets two provenance columns: source_file and loaded_at.
+
+WHERE TO RUN IT (same as the SQLite loader):
+    conda activate j_python3.11
+    python folder_to_postgres.py
+
+Your Postgres server (the athena_pg env) must be RUNNING at the same time.
+"""
+
+import os
+import re
+import sys
+import datetime as dt
+
+# ---- Required packages, with a friendly message if any are missing ----
+try:
+    import pandas as pd
+    from sqlalchemy import create_engine, inspect  # noqa: F401
+    from sqlalchemy.exc import SQLAlchemyError
+except ModuleNotFoundError as e:
+    print(f"Missing a required package: {e.name}")
+    print("In your j_python3.11 env, run:  pip install pandas sqlalchemy")
+    raise SystemExit(1)
+
+# Pick whichever Postgres driver you have (psycopg v3 preferred, psycopg2 fallback)
+try:
+    import psycopg  # noqa: F401  (psycopg v3)
+    DRIVER = "psycopg"
+except ModuleNotFoundError:
+    try:
+        import psycopg2  # noqa: F401
+        DRIVER = "psycopg2"
+    except ModuleNotFoundError:
+        print('No Postgres driver found. In j_python3.11, run:  pip install "psycopg[binary]"')
+        raise SystemExit(1)
+
+# =============================================================================
+# CONFIG -- edit these few values
+# =============================================================================
+ROOT_FOLDER = r"C:\Users\648685\BOOZ ALLEN HAMILTON\3D Team - 2 - ATHENA\athena_PACAF_Aug_2025\data\inputs"
+
+# You didn't say, so this defaults to ON. Set to False to load ONLY the CSVs
+# sitting directly inside ROOT_FOLDER (ignoring subfolders).
+INCLUDE_SUBFOLDERS = True
+
+DB_USER     = "postgres"
+DB_PASSWORD = "your_password"   # <-- the password you set during initdb
+DB_HOST     = "localhost"
+DB_PORT     = "5432"
+DB_NAME     = "athena"
+SCHEMA      = "public"
+
+IF_EXISTS   = "replace"         # "fail" | "replace" | "append"
+CHUNK_SIZE  = 5_000
+ENCODINGS   = ["utf-8-sig", "utf-8", "latin-1"]   # tried in order, per file
+# =============================================================================
+
+
+def safe_table_name(rel_path, used):
+    """Turn a relative CSV path into a valid, unique Postgres table name."""
+    no_ext = os.path.splitext(rel_path)[0]
+    name = no_ext.replace("\\", "_").replace("/", "_").lower()
+    name = re.sub(r"[^a-z0-9_]", "_", name)   # keep only letters/digits/_
+    name = re.sub(r"_+", "_", name).strip("_")
+    if not name:
+        name = "table"
+    if name[0].isdigit():
+        name = "t_" + name
+    name = name[:63]                          # Postgres identifier limit
+    base, n = name, 2                          # avoid duplicate names
+    while name in used:
+        suffix = f"_{n}"
+        name = base[:63 - len(suffix)] + suffix
+        n += 1
+    used.add(name)
+    return name
+
+
+def find_csvs(root, recurse):
+    if recurse:
+        for dirpath, _, files in os.walk(root):
+            for f in files:
+                if f.lower().endswith(".csv"):
+                    yield os.path.join(dirpath, f)
+    else:
+        for f in os.listdir(root):
+            full = os.path.join(root, f)
+            if os.path.isfile(full) and f.lower().endswith(".csv"):
+                yield full
+
+
+def read_csv_robust(path):
+    """Read a CSV, trying a few encodings before giving up."""
+    last_err = None
+    for enc in ENCODINGS:
+        try:
+            return pd.read_csv(path, encoding=enc, low_memory=False)
+        except UnicodeDecodeError as e:
+            last_err = e
+    raise last_err
+
+
+def main():
+    if not os.path.isdir(ROOT_FOLDER):
+        print(f"Folder not found:\n  {ROOT_FOLDER}")
+        print("Tip: right-click the folder in Explorer -> Copy as path, "
+              "and watch for OneDrive in the real path.")
+        sys.exit(1)
+
+    csv_files = sorted(find_csvs(ROOT_FOLDER, INCLUDE_SUBFOLDERS))
+    if not csv_files:
+        print(f"No .csv files found under:\n  {ROOT_FOLDER}")
+        sys.exit(0)
+    print(f"Found {len(csv_files)} CSV file(s).\n")
+
+    url = f"postgresql+{DRIVER}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    try:
+        engine = create_engine(url)
+        with engine.connect():
+            print(f"Connected to PostgreSQL database '{DB_NAME}' (driver: {DRIVER}).\n")
+    except SQLAlchemyError as e:
+        print("Could not connect to PostgreSQL. Common causes:")
+        print("  - the server isn't running (start it in the athena_pg env)")
+        print("  - wrong password")
+        print(f"  - the '{DB_NAME}' database doesn't exist yet")
+        print(f"\nDetails: {e}")
+        sys.exit(1)
+
+    used_names = set()
+    loaded, failed = 0, []
+    for path in csv_files:
+        rel = os.path.relpath(path, ROOT_FOLDER)
+        table = safe_table_name(rel, used_names)
+        print(f"-> {rel}  ->  {table}: reading...", end=" ", flush=True)
+        try:
+            df = read_csv_robust(path)
+        except Exception as e:
+            print(f"SKIPPED (could not read): {e}")
+            failed.append((rel, str(e)))
+            continue
+
+        df["source_file"] = rel
+        df["loaded_at"] = dt.datetime.now().isoformat()
+
+        print(f"{len(df):,} rows, writing...", end=" ", flush=True)
+        try:
+            df.to_sql(table, con=engine, schema=SCHEMA,
+                      if_exists=IF_EXISTS, index=False, chunksize=CHUNK_SIZE)
+            print("done.")
+            loaded += 1
+        except SQLAlchemyError as e:
+            print(f"FAILED: {e}")
+            failed.append((rel, str(e)))
+
+    print(f"\nLoaded {loaded} of {len(csv_files)} file(s) into {DB_NAME}.{SCHEMA}.")
+    if failed:
+        print(f"{len(failed)} file(s) had problems:")
+        for rel, err in failed:
+            print(f"  - {rel}: {err[:120]}")
+    print("\nRefresh the athena database in pgAdmin to see the new tables.")
+
+
+if __name__ == "__main__":
+    main()
