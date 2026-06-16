@@ -36,3 +36,32 @@ for letter, name in doc1_cols.items():
 print("\nDoc 2 columns:")
 for letter, name in doc2_cols.items():
     print(f"  {letter} = {name}")
+
+
+
+
+# Section 3 — Filter out US rows (but keep Alaska & Hawaii)
+
+# Grab the real names of the country and state columns
+country_col = doc1_cols["O"]
+state_col   = doc1_cols["P"]
+
+# Clean the values so comparisons are reliable:
+# .str.strip() removes stray spaces, .str.upper() ignores capitalization.
+country = doc1[country_col].str.strip().str.upper()
+state   = doc1[state_col].str.strip().str.upper()
+
+# A row counts as US if the country column says "US".
+is_us = country == "US"
+
+# ...but we keep Alaska and Hawaii even though they are US.
+is_exception = state.isin(["ALASKA", "HAWAII"])
+
+# Keep a row when it is NOT US, OR it is one of the exceptions.
+keep = (~is_us) | is_exception
+
+doc1_filtered = doc1[keep].copy()
+
+print("Rows before:", len(doc1))
+print("Rows after :", len(doc1_filtered))
+print("Dropped    :", len(doc1) - len(doc1_filtered))
