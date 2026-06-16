@@ -32,17 +32,20 @@ doc1.head()
 
 
 # Section 2 — See the columns in each document
-import string
 
-# We refer to columns by Excel letter (A, B, C, ...).
-# This simple version supports up to 26 columns (A-Z) — all we need here.
+# Turn a 0-based position into an Excel-style column letter:
+# 0->A, 1->B, ... 25->Z, 26->AA, 27->AB, ... 51->AZ, 52->BA, ...
+def excel_letter(index):
+    letters = ""
+    index += 1  # Excel counts from 1, not 0
+    while index > 0:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(ord("A") + remainder) + letters
+    return letters
+
+# Build a {letter: column_name} lookup for every column in a dataframe
 def letter_map(df):
-    if len(df.columns) > 26:
-        raise ValueError(
-            f"This file has {len(df.columns)} columns (more than 26). "
-            "The A-Z mapping won't cover them all — tell me and I'll extend it."
-        )
-    return dict(zip(string.ascii_uppercase, df.columns))
+    return {excel_letter(i): name for i, name in enumerate(df.columns)}
 
 doc1_cols = letter_map(doc1)
 doc2_cols = letter_map(doc2)
