@@ -1,0 +1,16 @@
+# Section 1 — Load the two documents
+import pandas as pd
+
+# Edit these two paths to point at your files
+doc1_path = "document1.csv"
+doc2_path = "document2.csv"
+
+# Read as text (dtype=str) so IDs and keys don't get changed into numbers.
+# fillna("") turns blank cells into empty strings instead of NaN.
+doc1 = pd.read_csv(doc1_path, dtype=str).fillna("")
+doc2 = pd.read_csv(doc2_path, dtype=str).fillna("")
+
+print("Doc 1 shape:", doc1.shape)
+print("Doc 2 shape:", doc2.shape)
+
+doc1.head()
