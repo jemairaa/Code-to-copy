@@ -68,22 +68,25 @@ for letter, name in doc2_cols.items():
 
 # Section 3 — Filter out US rows (but keep Alaska & Hawaii)
 
-# Helper: clean a text column so comparisons are reliable.
-# Handles the sneaky stuff that makes an exact match silently fail.
+# >>> Set these two to the real names from Section 2's printout <<<
+country_col = "country"   # the column that holds the country
+state_col   = "state"     # the column that holds the state
+
+# Helper: clean a text column so comparisons are reliable
+# (handles hidden spaces and capitalization differences).
 def clean(series):
     return (
-        series.astype(str)                      # ensure it's text
+        series.astype(str)
         .str.replace("\xa0", " ", regex=False)  # non-breaking space -> normal space
-        .str.replace(r"\s+", " ", regex=True)   # collapse double/triple spaces -> one
-        .str.strip()                            # trim leading/trailing spaces
+        .str.replace(r"\s+", " ", regex=True)   # collapse repeated spaces -> one
+        .str.strip()                            # trim the ends
         .str.upper()                            # ignore capitalization
     )
 
-# Clean the country and state columns (computed fresh every run)
-country = clean(doc1[doc1_cols["O"]])
-state   = clean(doc1[doc1_cols["P"]])
+country = clean(doc1[country_col])
+state   = clean(doc1[state_col])
 
-# Each of these is a column of True/False, one value per row
+# Each line is True/False for every row
 is_us        = country.eq("UNITED STATES")
 is_exception = state.isin(["ALASKA", "HAWAII"])
 
@@ -91,13 +94,8 @@ is_exception = state.isin(["ALASKA", "HAWAII"])
 keep = (~is_us) | is_exception
 doc1_filtered = doc1[keep].copy()
 
-# Report
-print("Rows total       :", len(doc1))
-print("Flagged as US     :", int(is_us.sum()))
-print("AK/HI kept        :", int((is_us & is_exception).sum()))
-print("Rows kept         :", len(doc1_filtered))
-print("Rows dropped      :", len(doc1) - len(doc1_filtered))
-
-
-
-
+print("Rows total    :", len(doc1))
+print("Flagged as US  :", int(is_us.sum()))
+print("AK/HI kept     :", int((is_us & is_exception).sum()))
+print("Rows kept      :", len(doc1_filtered))
+print("Rows dropped   :", len(doc1) - len(doc1_filtered))
