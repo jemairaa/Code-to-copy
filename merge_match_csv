@@ -14,3 +14,25 @@ print("Doc 1 shape:", doc1.shape)
 print("Doc 2 shape:", doc2.shape)
 
 doc1.head()
+
+
+
+
+
+
+
+# Section 2 — See the columns in each document
+import string
+
+# Pair each column with its Excel letter: A, B, C, ...
+# (Assumes each file has at most 26 columns — tell me if a file has more.)
+doc1_cols = dict(zip(string.ascii_uppercase, doc1.columns))
+doc2_cols = dict(zip(string.ascii_uppercase, doc2.columns))
+
+print("Doc 1 columns:")
+for letter, name in doc1_cols.items():
+    print(f"  {letter} = {name}")
+
+print("\nDoc 2 columns:")
+for letter, name in doc2_cols.items():
+    print(f"  {letter} = {name}")
