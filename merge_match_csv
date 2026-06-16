@@ -1,14 +1,25 @@
 # Section 1 — Load the two documents
 import pandas as pd
+from pathlib import Path
 
 # Edit these two paths to point at your files
 doc1_path = "document1.csv"
 doc2_path = "document2.csv"
 
-# Read as text (dtype=str) so IDs and keys don't get changed into numbers.
+# Fail early with a clear message if a path is wrong
+for path in (doc1_path, doc2_path):
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Can't find: {path}  (check the path/filename)")
+
+# Read as text (dtype=str) so IDs and keys don't get turned into numbers.
 # fillna("") turns blank cells into empty strings instead of NaN.
 doc1 = pd.read_csv(doc1_path, dtype=str).fillna("")
 doc2 = pd.read_csv(doc2_path, dtype=str).fillna("")
+
+# Trim stray spaces from the column HEADERS, so looking up a column
+# by letter later never fails because of a hidden space in the title.
+doc1.columns = doc1.columns.str.strip()
+doc2.columns = doc2.columns.str.strip()
 
 print("Doc 1 shape:", doc1.shape)
 print("Doc 2 shape:", doc2.shape)
@@ -20,14 +31,21 @@ doc1.head()
 
 
 
-
 # Section 2 — See the columns in each document
 import string
 
-# Pair each column with its Excel letter: A, B, C, ...
-# (Assumes each file has at most 26 columns — tell me if a file has more.)
-doc1_cols = dict(zip(string.ascii_uppercase, doc1.columns))
-doc2_cols = dict(zip(string.ascii_uppercase, doc2.columns))
+# We refer to columns by Excel letter (A, B, C, ...).
+# This simple version supports up to 26 columns (A-Z) — all we need here.
+def letter_map(df):
+    if len(df.columns) > 26:
+        raise ValueError(
+            f"This file has {len(df.columns)} columns (more than 26). "
+            "The A-Z mapping won't cover them all — tell me and I'll extend it."
+        )
+    return dict(zip(string.ascii_uppercase, df.columns))
+
+doc1_cols = letter_map(doc1)
+doc2_cols = letter_map(doc2)
 
 print("Doc 1 columns:")
 for letter, name in doc1_cols.items():
@@ -40,28 +58,43 @@ for letter, name in doc2_cols.items():
 
 
 
+
+
+
+
+
 # Section 3 — Filter out US rows (but keep Alaska & Hawaii)
 
-# Grab the real names of the country and state columns
-country_col = doc1_cols["O"]
-state_col   = doc1_cols["P"]
+# Helper: clean a text column so comparisons are reliable.
+# Handles the sneaky stuff that makes an exact match silently fail.
+def clean(series):
+    return (
+        series.astype(str)                      # ensure it's text
+        .str.replace("\xa0", " ", regex=False)  # non-breaking space -> normal space
+        .str.replace(r"\s+", " ", regex=True)   # collapse double/triple spaces -> one
+        .str.strip()                            # trim leading/trailing spaces
+        .str.upper()                            # ignore capitalization
+    )
 
-# Clean the values so comparisons are reliable:
-# .str.strip() removes stray spaces, .str.upper() ignores capitalization.
-country = doc1[country_col].str.strip().str.upper()
-state   = doc1[state_col].str.strip().str.upper()
+# Clean the country and state columns (computed fresh every run)
+country = clean(doc1[doc1_cols["O"]])
+state   = clean(doc1[doc1_cols["P"]])
 
-# A row counts as US if the country column says "US".
-is_us = country == "US"
-
-# ...but we keep Alaska and Hawaii even though they are US.
+# Each of these is a column of True/False, one value per row
+is_us        = country.eq("UNITED STATES")
 is_exception = state.isin(["ALASKA", "HAWAII"])
 
-# Keep a row when it is NOT US, OR it is one of the exceptions.
+# Keep a row when it is NOT US, OR it is Alaska/Hawaii
 keep = (~is_us) | is_exception
-
 doc1_filtered = doc1[keep].copy()
 
-print("Rows before:", len(doc1))
-print("Rows after :", len(doc1_filtered))
-print("Dropped    :", len(doc1) - len(doc1_filtered))
+# Report
+print("Rows total       :", len(doc1))
+print("Flagged as US     :", int(is_us.sum()))
+print("AK/HI kept        :", int((is_us & is_exception).sum()))
+print("Rows kept         :", len(doc1_filtered))
+print("Rows dropped      :", len(doc1) - len(doc1_filtered))
+
+
+
+
