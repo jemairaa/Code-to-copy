@@ -183,27 +183,30 @@ result.head()
 
 # Section 6 — Fill the Doc 2 columns where the keys match
 
-doc1_key = "1"   # Doc 1's match column is literally named "1"
-doc2_key = "6"   # Doc 2's match column is literally named "6"
+doc1_key = "1"   # Doc 1's IATA column
+doc2_key = "6"   # Doc 2's IATA column
 
-# Clean the keys on both sides so they compare reliably (same trick as Section 3)
+# Clean the keys on both sides so they compare reliably
 result_key = clean(result[doc1_key])
 doc2_keys  = clean(doc2[doc2_key])
 
-# Build a lookup from Doc 2: key -> that row (keep the first if a key repeats)
+# Build a lookup from Doc 2: key -> that row.
 doc2_lookup = doc2.copy()
 doc2_lookup["_key"] = doc2_keys
+doc2_lookup = doc2_lookup[doc2_lookup["_key"] != ""]          # <-- drop blank IATA in Doc 2
 doc2_lookup = doc2_lookup.drop_duplicates("_key", keep="first").set_index("_key")
 
-# Which Doc 1 rows have a matching key in Doc 2?
-matched = result_key.isin(doc2_lookup.index)
+# A row matches only if its IATA is NOT blank AND exists in Doc 2.
+has_iata = result_key != ""                                  # <-- no IATA on Doc 1 = no match
+matched  = has_iata & result_key.isin(doc2_lookup.index)
 
 # For each Doc 2 column, copy its value into the matching rows
 for original_col, new_name in zip(doc2.columns, new_cols):
     result.loc[matched, new_name] = result_key[matched].map(doc2_lookup[original_col])
 
 # Report
-print("Doc 1 rows total   :", len(result))
-print("Rows matched        :", int(matched.sum()))
-print("Rows with no match  :", int((~matched).sum()))
+print("Doc 1 rows total      :", len(result))
+print("Doc 1 rows missing IATA:", int((~has_iata).sum()))
+print("Rows matched           :", int(matched.sum()))
+print("Rows with no match     :", int((~matched).sum()))
 result.head()
