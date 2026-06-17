@@ -1,3 +1,16 @@
+# Force to string AND check — all in one cell, no ordering ambiguity
+doc1["iata"]      = doc1["iata"].astype(str)
+doc2["iata_code"] = doc2["iata_code"].astype(str)
+
+print("Doc1 iata     :", doc1["iata"].map(type).value_counts().to_dict())
+print("Doc2 iata_code:", doc2["iata_code"].map(type).value_counts().to_dict())
+
+
+
+
+
+
+
 """
 Merge & match two CSV documents.
 
