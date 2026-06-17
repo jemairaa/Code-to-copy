@@ -12,19 +12,29 @@ print("doc1 columns:", list(df1.columns))
 print("doc2 columns:", list(df2.columns))
 print("doc1 total rows:", len(df1))
 
-# Treat empty strings / whitespace-only cells as "no value" (NaN) in both keys.
-df1[key1] = df1[key1].replace(r"^\s*$", pd.NA, regex=True)
-df2[key2] = df2[key2].replace(r"^\s*$", pd.NA, regex=True)
+# Build a normalized key on both sides: trim spaces + uppercase.
+# This lets "jfk ", " JFK", "Jfk" all match "JFK". Original values are kept for output.
+df1["_k"] = df1[key1].astype("string").str.strip().str.upper()
+df2["_k"] = df2[key2].astype("string").str.strip().str.upper()
 
-# Drop doc2 rows with no code, so a blank iata can never match a blank code.
-df2 = df2.dropna(subset=[key2])
+# Skip rows with no value (blank/whitespace becomes NA after the steps above).
+df1 = df1.dropna(subset=["_k"])
+df1 = df1[df1["_k"] != ""]
+df2 = df2.dropna(subset=["_k"])
+df2 = df2[df2["_k"] != ""]
 
-# doc2 has the same iata_code repeated many times, which multiplies rows on a join.
-# Keep only the FIRST matching doc2 row per code so each doc1 row maps to one row.
-df2_unique = df2.drop_duplicates(subset=key2, keep="first")
-print("doc2 total rows:", len(df2), "| unique", key2, ":", len(df2_unique))
+# doc2 repeats codes many times; keep only the first row per code so each
+# doc1 code maps to a single doc2 row instead of multiplying.
+df2_unique = df2.drop_duplicates(subset="_k", keep="first")
+print("doc1 rows with a value:", len(df1))
+print("doc2 total rows:", len(df2), "| unique codes:", len(df2_unique))
 
-# Full iata column from doc1, with the one matching doc2 row attached beside it.
-matched = df1[[key1]].merge(df2_unique, left_on=key1, right_on=key2, how="left")
+# Full iata column from doc1, with the matching doc2 row attached beside it.
+matched = df1[[key1, "_k"]].merge(df2_unique, on="_k", how="left")
+matched = matched.drop(columns="_k")
 matched.to_csv("matched.csv", index=False)
-print(f"Wrote {len(matched)} rows to matched.csv")
+
+n_match = matched[key2].notna().sum()
+print(f"\nWrote {len(matched)} rows to matched.csv")
+print(f"  - found a doc2 match: {n_match}")
+print(f"  - no doc2 match:      {len(matched) - n_match}")
