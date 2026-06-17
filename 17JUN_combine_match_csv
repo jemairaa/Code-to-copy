@@ -1,0 +1,171 @@
+"""
+Merge & match two CSV documents.
+
+Usage:
+    python merge_pipeline.py
+
+Edit the CONFIG section for your file paths and column names.
+"""
+import re
+from pathlib import Path
+
+import pandas as pd
+
+
+# ===========================================================================
+# CONFIG  -- edit these
+# ===========================================================================
+DOC1_PATH   = "document1.csv"
+DOC2_PATH   = "document2.csv"
+OUTPUT_PATH = "merged_output.csv"
+
+# Match keys (the IATA columns)
+DOC1_KEY = "iata"
+DOC2_KEY = "iata_code"
+
+# US filter
+COUNTRY_COL = "country"
+STATE_COL   = "state"
+KEEP_PLACES = ["Alaska", "Hawaii", "Florida"]   # states kept even though US
+
+# Columns to clean in each file
+DOC1_CLEAN_COLS = ["iata", "country", "state"]
+DOC2_CLEAN_COLS = ["iata_code"]
+
+# Columns to build dictionaries from (use real names)
+DICT_COLUMNS = ["columnA", "columnB", "columnC", "iata", "country", "state"]
+
+NA_PLACEHOLDERS = {"", "NAN", "NONE", "NULL"}
+
+
+# ===========================================================================
+# Helpers
+# ===========================================================================
+def clean_column(series):
+    """Clean a whole column: fix spaces, strip '.0', blank out nan/none/null."""
+    cleaned = (
+        series.astype(str)
+        .str.replace("\xa0", " ", regex=False)   # non-breaking space -> normal
+        .str.replace(r"\s+", " ", regex=True)    # collapse repeated spaces
+        .str.strip()                             # trim ends
+        .str.replace(r"\.0$", "", regex=True)    # "123.0" -> "123"
+    )
+    is_blank = cleaned.str.upper().isin(NA_PLACEHOLDERS)
+    return cleaned.where(~is_blank, "")
+
+
+def clean_key(value):
+    """Clean a single key value for matching."""
+    text = re.sub(r"\.0$", "", str(value).strip()).upper()
+    if text in ("", "NAN", "NONE", "NULL"):
+        return ""
+    return text
+
+
+# ===========================================================================
+# Section 1 -- Load (as text, so numbers don't become floats)
+# ===========================================================================
+for path in (DOC1_PATH, DOC2_PATH):
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Can't find: {path}  (check the path/filename)")
+
+doc1 = pd.read_csv(DOC1_PATH, dtype=str)
+doc2 = pd.read_csv(DOC2_PATH, dtype=str)
+print("Doc 1 shape:", doc1.shape)
+print("Doc 2 shape:", doc2.shape)
+
+
+# ===========================================================================
+# Section 1b -- Clean specific columns
+# ===========================================================================
+for col in DOC1_CLEAN_COLS:
+    doc1[col] = clean_column(doc1[col])
+for col in DOC2_CLEAN_COLS:
+    doc2[col] = clean_column(doc2[col])
+print("Cleaned in Doc 1:", DOC1_CLEAN_COLS)
+print("Cleaned in Doc 2:", DOC2_CLEAN_COLS)
+
+
+# ===========================================================================
+# Section 2 -- See the column names
+# ===========================================================================
+print("Doc 1 columns:", list(doc1.columns))
+print("Doc 2 columns:", list(doc2.columns))
+
+
+# ===========================================================================
+# Section 3 -- Filter out US rows, keep certain states
+# ===========================================================================
+country = doc1[COUNTRY_COL].astype(str).str.strip().str.upper()
+state   = doc1[STATE_COL].astype(str).str.strip().str.upper()
+keep_places = [p.strip().upper() for p in KEEP_PLACES]
+
+is_us        = country.eq("UNITED STATES")
+is_exception = state.isin(keep_places)
+keep         = (~is_us) | is_exception
+doc1_filtered = doc1[keep].copy()
+
+print("Rows total    :", len(doc1))
+print("Flagged as US  :", int(is_us.sum()))
+print("Kept anyway    :", int((is_us & is_exception).sum()))
+print("Rows kept      :", len(doc1_filtered))
+
+
+# ===========================================================================
+# Section 4 -- Build a dictionary of values for each column
+# ===========================================================================
+dictionaries = {}
+for col in DICT_COLUMNS:
+    values = doc1_filtered[col].astype(str).str.strip()
+    values = values[values != ""]
+    dictionaries[col] = set(values)
+    print(f"{col}: {len(dictionaries[col])} unique values")
+
+
+# ===========================================================================
+# Section 5 -- Add Doc 2's columns (empty) at the front of Doc 1
+# ===========================================================================
+result = doc1_filtered.copy()
+
+new_cols = []
+for col in doc2.columns:
+    new_name = col if col not in result.columns else col + "_doc2"
+    new_cols.append(new_name)
+    result[new_name] = ""
+
+original_cols = list(doc1_filtered.columns)
+result = result[new_cols + original_cols]
+print("New columns added at front:", len(new_cols))
+
+
+# ===========================================================================
+# Section 6 -- Fill the Doc 2 columns where the IATA keys match
+# ===========================================================================
+result_key = result[DOC1_KEY].map(clean_key)
+doc2_keys  = doc2[DOC2_KEY].map(clean_key)
+
+# Overlap check (how many codes can possibly match)
+s1 = set(result_key) - {""}
+s2 = set(doc2_keys) - {""}
+print("OVERLAP (matchable):", len(s1 & s2))
+
+doc2_lookup = doc2.copy()
+doc2_lookup["_key"] = doc2_keys
+doc2_lookup = doc2_lookup[doc2_lookup["_key"] != ""]
+doc2_lookup = doc2_lookup.drop_duplicates("_key", keep="first").set_index("_key")
+
+has_iata = result_key != ""
+matched  = has_iata & result_key.isin(doc2_lookup.index)
+
+for original_col, new_name in zip(doc2.columns, new_cols):
+    result.loc[matched, new_name] = result_key[matched].map(doc2_lookup[original_col])
+
+print("Rows matched       :", int(matched.sum()))
+print("Rows with no match :", int((~matched).sum()))
+
+
+# ===========================================================================
+# Section 7 -- Save the result to a CSV
+# ===========================================================================
+result.to_csv(OUTPUT_PATH, index=False)
+print("Saved", len(result), "rows to", OUTPUT_PATH)
