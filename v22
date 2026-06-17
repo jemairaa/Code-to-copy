@@ -7,8 +7,8 @@ key1 = "id"           # key column in file 1
 key2 = "customer_id"  # key column in file 2
 # -------------------------------
 
-df1 = pd.read_csv(file1)
-df2 = pd.read_csv(file2)
+df1 = pd.read_csv(file1, encoding="latin-1")
+df2 = pd.read_csv(file2, encoding="latin-1")
 
 # Show what the files actually contain, so column names can be confirmed
 print("file1 columns:", list(df1.columns))
