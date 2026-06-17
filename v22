@@ -5,36 +5,35 @@ file2 = "file2.csv"   # <- set to your doc2 filename
 key1 = "iata"         # key column in doc1
 key2 = "iata_code"    # key column in doc2
 
+# Columns to pull FROM doc1 onto the matching doc2 rows:
+doc1_cols = ["icao", "geoloc", "airfield_name", "iata", "country_name", "cluster"]
+
 df1 = pd.read_csv(file1, encoding="latin-1")
 df2 = pd.read_csv(file2, encoding="latin-1")
 
 print("doc1 columns:", list(df1.columns))
 print("doc2 columns:", list(df2.columns))
-print("doc1 total rows:", len(df1))
+print("doc2 total rows:", len(df2))
 
-# Build a normalized key on both sides: trim spaces + uppercase.
-# This lets "jfk ", " JFK", "Jfk" all match "JFK". Original values are kept for output.
+# Make sure the requested doc1 columns actually exist.
+missing = [c for c in doc1_cols if c not in df1.columns]
+if missing:
+    raise SystemExit(f"\nThese columns are not in doc1: {missing}\nAvailable: {list(df1.columns)}")
+
+# Normalized key on both sides: trim spaces + uppercase, so case/spacing don't block matches.
 df1["_k"] = df1[key1].astype("string").str.strip().str.upper()
 df2["_k"] = df2[key2].astype("string").str.strip().str.upper()
 
-# Skip rows with no value (blank/whitespace becomes NA after the steps above).
-df1 = df1.dropna(subset=["_k"])
-df1 = df1[df1["_k"] != ""]
-df2 = df2.dropna(subset=["_k"])
-df2 = df2[df2["_k"] != ""]
+# Skip doc1 rows with no value, and keep one row per code (lookup table).
+df1 = df1.dropna(subset=["_k"]); df1 = df1[df1["_k"] != ""]
+df1_lookup = df1.drop_duplicates(subset="_k", keep="first")[["_k"] + doc1_cols]
 
-# doc2 repeats codes many times; keep only the first row per code so each
-# doc1 code maps to a single doc2 row instead of multiplying.
-df2_unique = df2.drop_duplicates(subset="_k", keep="first")
-print("doc1 rows with a value:", len(df1))
-print("doc2 total rows:", len(df2), "| unique codes:", len(df2_unique))
-
-# Full iata column from doc1, with the matching doc2 row attached beside it.
-matched = df1[[key1, "_k"]].merge(df2_unique, on="_k", how="left")
+# Base = doc2 (all rows kept). Attach the doc1 columns where iata matches iata_code.
+matched = df2.merge(df1_lookup, on="_k", how="left", suffixes=("", "_doc1"))
 matched = matched.drop(columns="_k")
 matched.to_csv("matched.csv", index=False)
 
-n_match = matched[key2].notna().sum()
+n_match = matched[doc1_cols[0]].notna().sum()
 print(f"\nWrote {len(matched)} rows to matched.csv")
-print(f"  - found a doc2 match: {n_match}")
-print(f"  - no doc2 match:      {len(matched) - n_match}")
+print(f"  - doc2 rows that matched a doc1 code: {n_match}")
+print(f"  - doc2 rows with no doc1 match:       {len(matched) - n_match}")
