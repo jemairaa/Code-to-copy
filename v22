@@ -3,23 +3,35 @@ import pandas as pd
 # ---- Edit these four lines ----
 file1 = "file1.csv"
 file2 = "file2.csv"
-key1 = "iata"         # key column in file 1
-key2 = "iata_code"    # key column in file 2
+key1 = "iata"         # key column in doc1
+key2 = "iata_code"    # key column in doc2
 # -------------------------------
 
 df1 = pd.read_csv(file1, encoding="latin-1")
 df2 = pd.read_csv(file2, encoding="latin-1")
 
-# Show what the files actually contain, so column names can be confirmed
-print("file1 columns:", list(df1.columns))
-print("file2 columns:", list(df2.columns))
+print("doc1 columns:", list(df1.columns))
+print("doc2 columns:", list(df2.columns))
 
 if key1 not in df1.columns:
     raise SystemExit(f"\n'{key1}' is not a column in {file1}. Pick one of: {list(df1.columns)}")
 if key2 not in df2.columns:
     raise SystemExit(f"\n'{key2}' is not a column in {file2}. Pick one of: {list(df2.columns)}")
 
-# Output: the key column from doc1 first, then all columns from doc2
-matched = df1[[key1]].merge(df2, left_on=key1, right_on=key2, how="inner")
+# Keep the FULL iata column from doc1, then attach doc2's matching columns.
+# how="left" => every doc1 row is kept; doc2 columns are blank where no match.
+matched = df1[[key1]].merge(df2, left_on=key1, right_on=key2, how="left")
 matched.to_csv("matched.csv", index=False)
-print(f"\nMatched {len(matched)} rows -> matched.csv")
+
+# ---- Self-check so you can verify without sharing data ----
+n_doc1 = len(df1)
+n_out = len(matched)
+n_with_match = matched[key2].notna().sum()
+print(f"\ndoc1 rows:            {n_doc1}")
+print(f"rows in matched.csv:  {n_out}")
+print(f"  - with a doc2 match: {n_with_match}")
+print(f"  - no match (blank):  {n_out - n_with_match}")
+if n_out < n_doc1:
+    print("WARNING: output has fewer rows than doc1 — something dropped doc1 rows.")
+else:
+    print("OK: every doc1 row is present (extra rows mean doc2 had duplicate keys).")
