@@ -12,9 +12,13 @@ print("doc1 columns:", list(df1.columns))
 print("doc2 columns:", list(df2.columns))
 print("doc1 total rows:", len(df1))
 
-# Full iata column from doc1, with doc2's matching rows attached beside it.
-# how="left" keeps every doc1 row; doc2 columns are blank where there's no match.
-matched = df1[[key1]].merge(df2, left_on=key1, right_on=key2, how="left")
+# doc2 has the same iata_code repeated many times, which multiplies rows on a join.
+# Keep only the FIRST matching doc2 row per code so each doc1 row maps to one row.
+df2_unique = df2.drop_duplicates(subset=key2, keep="first")
+print("doc2 total rows:", len(df2), "| unique", key2, ":", len(df2_unique))
+
+# Full iata column from doc1, with the one matching doc2 row attached beside it.
+matched = df1[[key1]].merge(df2_unique, left_on=key1, right_on=key2, how="left")
 matched.to_csv("matched.csv", index=False)
 print(f"Wrote {len(matched)} rows to matched.csv")
 
