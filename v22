@@ -16,6 +16,9 @@ print("doc1 total rows:", len(df1))
 df1[key1] = df1[key1].replace(r"^\s*$", pd.NA, regex=True)
 df2[key2] = df2[key2].replace(r"^\s*$", pd.NA, regex=True)
 
+# Skip doc1 rows that have no iata value.
+df1 = df1.dropna(subset=[key1])
+
 # Drop doc2 rows with no code, so a blank iata can never match a blank code.
 df2 = df2.dropna(subset=[key2])
 
@@ -28,32 +31,3 @@ print("doc2 total rows:", len(df2), "| unique", key2, ":", len(df2_unique))
 matched = df1[[key1]].merge(df2_unique, left_on=key1, right_on=key2, how="left")
 matched.to_csv("matched.csv", index=False)
 print(f"Wrote {len(matched)} rows to matched.csv")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-import pandas as pd
-
-file1 = "file1.csv"   # <- set to your doc1 filename
-key1 = "iata"         # key column in doc1
-
-df1 = pd.read_csv(file1, encoding="latin-1")
-
-print("doc1 columns:", list(df1.columns))
-print("doc1 total rows:", len(df1))
-
-# Write every value of the iata column to a file
-df1[[key1]].to_csv("doc1_iata.csv", index=False)
-print(f"Wrote {len(df1)} rows of '{key1}' to doc1_iata.csv")
