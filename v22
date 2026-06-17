@@ -7,5 +7,7 @@ df1 = pd.read_csv(file1, encoding="latin-1")
 
 print("doc1 columns:", list(df1.columns))
 print("doc1 total rows:", len(df1))
-print("\n--- all values in the iata column ---")
-print(df1[key1].to_string(index=False))
+
+# Write every value of the iata column to a file
+df1[[key1]].to_csv("doc1_iata.csv", index=False)
+print(f"Wrote {len(df1)} rows of '{key1}' to doc1_iata.csv")
