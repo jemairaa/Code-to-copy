@@ -27,7 +27,37 @@ print("Doc 2 shape:", doc2.shape)
 doc1.head()
 
 
+# Section 1b — Clean both files once, before anything else
+import re
 
+# Values that really mean "blank"
+NA_PLACEHOLDERS = {"", "NAN", "NONE", "NULL", "N/A", "NA"}
+
+def tidy(df):
+    df = df.copy()
+
+    # 1) Clean column NAMES (strip hidden/double spaces)
+    df.columns = [
+        re.sub(r"\s+", " ", str(c).replace("\xa0", " ")).strip()
+        for c in df.columns
+    ]
+
+    # 2) Clean every VALUE in every column
+    for col in df.columns:
+        cleaned = (
+            df[col].astype(str)
+            .str.replace("\xa0", " ", regex=False)   # non-breaking space -> normal
+            .str.replace(r"\s+", " ", regex=True)    # collapse repeated spaces
+            .str.strip()                             # trim ends
+        )
+        # turn "nan", "none", "n/a", etc. into a real blank ""
+        is_blank = cleaned.str.upper().isin(NA_PLACEHOLDERS)
+        df[col] = cleaned.where(~is_blank, "")
+    return df
+
+doc1 = tidy(doc1)
+doc2 = tidy(doc2)
+print("Both files cleaned — names, whitespace, and blank placeholders.")
 
 
 
