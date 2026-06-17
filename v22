@@ -1,6 +1,41 @@
 import pandas as pd
 
 file1 = "file1.csv"   # <- set to your doc1 filename
+file2 = "file2.csv"   # <- set to your doc2 filename
+key1 = "iata"         # key column in doc1
+key2 = "iata_code"    # key column in doc2
+
+df1 = pd.read_csv(file1, encoding="latin-1")
+df2 = pd.read_csv(file2, encoding="latin-1")
+
+print("doc1 columns:", list(df1.columns))
+print("doc2 columns:", list(df2.columns))
+print("doc1 total rows:", len(df1))
+
+# Full iata column from doc1, with doc2's matching rows attached beside it.
+# how="left" keeps every doc1 row; doc2 columns are blank where there's no match.
+matched = df1[[key1]].merge(df2, left_on=key1, right_on=key2, how="left")
+matched.to_csv("matched.csv", index=False)
+print(f"Wrote {len(matched)} rows to matched.csv")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import pandas as pd
+
+file1 = "file1.csv"   # <- set to your doc1 filename
 key1 = "iata"         # key column in doc1
 
 df1 = pd.read_csv(file1, encoding="latin-1")
