@@ -1,0 +1,172 @@
+import pandas as pd
+from pathlib import Path
+
+# Edit these two paths to point at your files
+doc1_path = "document1.csv"
+doc2_path = "document2.csv"
+
+# Fail early with a clear message if a path is wrong
+for path in (doc1_path, doc2_path):
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Can't find: {path}  (check the path/filename)")
+
+doc1 = pd.read_csv(doc1_path, dtype=str)
+doc2 = pd.read_csv(doc2_path, dtype=str)
+
+print("Doc 1 shape:", doc1.shape)
+print("Doc 2 shape:", doc2.shape)
+
+
+import re
+
+# Values that really mean "blank" (NOT "NA"/"N/A" — those can be real codes)
+NA_PLACEHOLDERS = {"", "NAN", "NONE", "NULL"}
+
+def tidy(df):
+    df = df.copy()
+
+    # Clean column NAMES
+    df.columns = [
+        re.sub(r"\s+", " ", str(c).replace("\xa0", " ")).strip()
+        for c in df.columns
+    ]
+
+    # Clean every VALUE in every column
+    for col in df.columns:
+        cleaned = (
+            df[col].astype(str)
+            .str.replace("\xa0", " ", regex=False)   # non-breaking space -> normal
+            .str.replace(r"\s+", " ", regex=True)    # collapse repeated spaces
+            .str.strip()                             # trim ends
+        )
+        is_blank = cleaned.str.upper().isin(NA_PLACEHOLDERS)
+        df[col] = cleaned.where(~is_blank, "")       # nan/none/null -> ""
+    return df
+
+doc1 = tidy(doc1)
+doc2 = tidy(doc2)
+print("Both files cleaned — names, whitespace, and blank placeholders.")
+
+
+
+
+
+
+
+
+print("Doc 1 columns:")
+for name in doc1.columns:
+    print(" ", name)
+
+print("\nDoc 2 columns:")
+for name in doc2.columns:
+    print(" ", name)
+
+
+
+
+country_col = "country"   # <-- real names from Section 2
+state_col   = "state"
+
+def clean(series):
+    return (
+        series.astype(str)
+        .str.replace("\xa0", " ", regex=False)
+        .str.replace(r"\s+", " ", regex=True)
+        .str.strip()
+        .str.upper()
+    )
+
+country = clean(doc1[country_col])
+state   = clean(doc1[state_col])
+
+# States to keep even though they're in the US (type in any case)
+KEEP_PLACES = ["Alaska", "Hawaii", "Florida"]
+keep_places = [p.strip().upper() for p in KEEP_PLACES]
+
+is_us        = country.eq("UNITED STATES")
+is_exception = state.isin(keep_places)
+
+keep = (~is_us) | is_exception
+doc1_filtered = doc1[keep].copy()
+
+print("Rows total    :", len(doc1))
+print("Flagged as US  :", int(is_us.sum()))
+print("Kept anyway    :", int((is_us & is_exception).sum()))
+print("Rows kept      :", len(doc1_filtered))
+print("Rows dropped   :", len(doc1) - len(doc1_filtered))
+
+
+
+
+# List the columns you want a dictionary for (real names from Section 2)
+dict_columns = ["columnA", "columnB", "columnC", "columnM", country_col, state_col]
+
+dictionaries = {}
+for col in dict_columns:
+    values = doc1_filtered[col].astype(str).str.strip()
+    values = values[values != ""]          # drop blanks
+    dictionaries[col] = set(values)        # unique values
+
+for col, values in dictionaries.items():
+    print(f"{col}: {len(values)} unique values")
+
+
+
+
+
+result = doc1_filtered.copy()
+
+new_cols = []
+for col in doc2.columns:
+    new_name = col if col not in result.columns else col + "_doc2"  # avoid collisions
+    new_cols.append(new_name)
+    result[new_name] = ""     # empty for now; filled in Section 6
+
+# Put the new Doc 2 columns first, then the original Doc 1 columns
+original_cols = list(doc1_filtered.columns)
+result = result[new_cols + original_cols]
+
+print("New columns added at front:", len(new_cols))
+print("Original Doc 1 columns kept:", len(original_cols))
+result.head()
+
+
+
+
+
+
+
+
+doc1_key = "iata"   # Doc 1's IATA column
+doc2_key = "iata_data"   # Doc 2's IATA column
+
+# Reset the Doc 2 columns to blank first, so re-running starts clean
+for new_name in new_cols:
+    result[new_name] = ""
+
+def clean_key(value):
+    text = str(value).strip().upper()
+    if text in ("", "NAN", "NONE", "NULL"):
+        return ""
+    return text
+
+result_key = result[doc1_key].map(clean_key)
+doc2_keys  = doc2[doc2_key].map(clean_key)
+
+doc2_lookup = doc2.copy()
+doc2_lookup["_key"] = doc2_keys
+doc2_lookup = doc2_lookup[doc2_lookup["_key"] != ""]
+doc2_lookup = doc2_lookup.drop_duplicates("_key", keep="first").set_index("_key")
+
+has_iata = result_key != ""
+matched  = has_iata & result_key.isin(doc2_lookup.index)
+
+for original_col, new_name in zip(doc2.columns, new_cols):
+    result.loc[matched, new_name] = result_key[matched].map(doc2_lookup[original_col])
+
+print("Doc 1 rows total       :", len(result))
+print("Doc 1 rows missing IATA :", int((~has_iata).sum()))
+print("Rows matched            :", int(matched.sum()))
+print("Rows with no match      :", int((~matched).sum()))
+result.head()
