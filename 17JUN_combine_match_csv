@@ -1,3 +1,59 @@
+# Option A: print without truncation
+import pprint
+pprint.pprint(doc1_codes)
+pprint.pprint(doc2_codes)
+
+# Option B: save each list to a text file
+pd.Series(doc1_codes).to_csv("doc1_iata_values.csv", index=False)
+pd.Series(doc2_codes).to_csv("doc2_iata_code_values.csv", index=False)
+print("Saved both lists.")
+
+
+
+# Find the codes that appear in BOTH columns
+set1 = set(doc1["iata"].astype(str).str.strip().str.upper())
+set2 = set(doc2["iata_code"].astype(str).str.strip().str.upper())
+
+# Drop blanks from both
+for blank in ["", "NAN", "NONE", "NULL"]:
+    set1.discard(blank)
+    set2.discard(blank)
+
+matches = sorted(set1 & set2)      # & = "in both"
+
+print("Codes in Doc 1 :", len(set1))
+print("Codes in Doc 2 :", len(set2))
+print("MATCHES (in both):", len(matches))
+print(matches)
+
+print("Only in Doc 1:", sorted(set1 - set2)[:30])   # in Doc 1, not Doc 2
+print("Only in Doc 2:", sorted(set2 - set1)[:30])   # in Doc 2, not Doc 1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def column_summary(df, col):
     values = df[col].astype(str).str.strip()
     filled = values[~values.str.upper().isin(["", "NAN", "NONE", "NULL"])]
