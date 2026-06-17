@@ -16,9 +16,6 @@ print("doc1 total rows:", len(df1))
 df1[key1] = df1[key1].replace(r"^\s*$", pd.NA, regex=True)
 df2[key2] = df2[key2].replace(r"^\s*$", pd.NA, regex=True)
 
-# Skip doc1 rows that have no iata value.
-df1 = df1.dropna(subset=[key1])
-
 # Drop doc2 rows with no code, so a blank iata can never match a blank code.
 df2 = df2.dropna(subset=[key2])
 
