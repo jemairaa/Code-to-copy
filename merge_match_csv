@@ -66,14 +66,13 @@ for letter, name in doc2_cols.items():
 
 
 
-# Section 3 — Filter out US rows (but keep Alaska & Hawaii)
+# Section 3 — Filter out US rows, but keep certain states
 
-# >>> Set these two to the real names from Section 2's printout <<<
-country_col = "country"   # the column that holds the country
-state_col   = "state"     # the column that holds the state
+country_col = "country"   # <-- real names from Section 2
+state_col   = "state"
 
 # Helper: clean a text column so comparisons are reliable
-# (handles hidden spaces and capitalization differences).
+# (handles hidden spaces and capitalization).
 def clean(series):
     return (
         series.astype(str)
@@ -86,16 +85,21 @@ def clean(series):
 country = clean(doc1[country_col])
 state   = clean(doc1[state_col])
 
-# Each line is True/False for every row
-is_us        = country.eq("UNITED STATES")
-is_exception = state.isin(["ALASKA", "HAWAII"])
+# States we keep even though they're in the US (type them in ANY case)
+KEEP_PLACES = ["Alaska", "Hawaii", "Florida"]
+keep_places = [p.strip().upper() for p in KEEP_PLACES]   # match clean()'s uppercasing
 
-# Keep a row when it is NOT US, OR it is Alaska/Hawaii
+# True/False for every row
+is_us        = country.eq("UNITED STATES")
+is_exception = state.isin(keep_places)
+
+# Keep a row when it is NOT US, OR it is one of the kept states
 keep = (~is_us) | is_exception
 doc1_filtered = doc1[keep].copy()
 
+# Report
 print("Rows total    :", len(doc1))
 print("Flagged as US  :", int(is_us.sum()))
-print("AK/HI kept     :", int((is_us & is_exception).sum()))
+print("Kept anyway    :", int((is_us & is_exception).sum()))
 print("Rows kept      :", len(doc1_filtered))
 print("Rows dropped   :", len(doc1) - len(doc1_filtered))
