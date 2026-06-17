@@ -1,3 +1,35 @@
+import re
+
+NA_PLACEHOLDERS = {"", "NAN", "NONE", "NULL"}
+
+def clean_column(series):
+    cleaned = (
+        series.astype(str)                          # force to text
+        .str.replace("\xa0", " ", regex=False)      # non-breaking space -> normal
+        .str.replace(r"\s+", " ", regex=True)       # collapse repeated spaces
+        .str.strip()                                # trim ends
+        .str.replace(r"\.0$", "", regex=True)       # "123.0" -> "123"
+    )
+    is_blank = cleaned.str.upper().isin(NA_PLACEHOLDERS)
+    return cleaned.where(~is_blank, "")             # nan/none/null -> ""
+
+# Pick exactly which columns to clean in each file
+doc1_clean_cols = ["iata", "country", "state"]
+doc2_clean_cols = ["iata_code"]
+
+for col in doc1_clean_cols:
+    doc1[col] = clean_column(doc1[col])
+for col in doc2_clean_cols:
+    doc2[col] = clean_column(doc2[col])
+
+print("Cleaned in Doc 1:", doc1_clean_cols)
+print("Cleaned in Doc 2:", doc2_clean_cols) 
+
+
+
+
+
+
 import pandas as pd
 from pathlib import Path
 
