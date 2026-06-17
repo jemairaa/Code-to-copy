@@ -1,3 +1,17 @@
+def column_summary(df, col):
+    values = df[col].astype(str).str.strip()
+    filled = values[~values.str.upper().isin(["", "NAN", "NONE", "NULL"])]
+    print(f"{col}:")
+    print("  total rows :", len(df))
+    print("  filled     :", len(filled))
+    print("  blank      :", len(df) - len(filled))
+    print("  unique     :", filled.nunique())
+    print()
+
+column_summary(doc1, "iata")
+column_summary(doc2, "iata_code")
+
+
 a = doc1["iata"].astype(str).str.strip().str.upper()
 b = doc2["iata_code"].astype(str).str.strip().str.upper()
 a = a[~a.isin(["", "NAN", "NONE", "NULL"])]
