@@ -103,3 +103,34 @@ print("Flagged as US  :", int(is_us.sum()))
 print("Kept anyway    :", int((is_us & is_exception).sum()))
 print("Rows kept      :", len(doc1_filtered))
 print("Rows dropped   :", len(doc1) - len(doc1_filtered))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Section 4 — Build a dictionary of values for each important column
+
+# List the columns you want a dictionary for (real names from Section 2).
+# country_col and state_col are already defined in Section 3.
+dict_columns = ["columnA", "columnB", "columnC", "columnM", country_col, state_col]
+
+# For each column, collect its unique, non-blank values into a set
+dictionaries = {}
+for col in dict_columns:
+    values = doc1_filtered[col].astype(str).str.strip()   # text, trimmed
+    values = values[values != ""]                         # drop blank cells
+    dictionaries[col] = set(values)                       # keep unique values
+
+# Show how many unique values each column ended up with
+for col, values in dictionaries.items():
+    print(f"{col}: {len(values)} unique values")
