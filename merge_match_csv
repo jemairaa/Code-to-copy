@@ -134,3 +134,26 @@ for col in dict_columns:
 # Show how many unique values each column ended up with
 for col, values in dictionaries.items():
     print(f"{col}: {len(values)} unique values")
+
+
+
+
+
+
+# Section 5 — Add Doc 2's columns (empty) to Doc 1
+
+# Start from the filtered Doc 1 (don't touch the original)
+result = doc1_filtered.copy()
+
+# Add one empty column for each column in Doc 2
+for col in doc2.columns:
+    new_name = col
+    # If Doc 1 already has a column with this name, add a suffix so we don't overwrite it
+    if new_name in result.columns:
+        new_name = col + "_doc2"
+    result[new_name] = ""    # empty for now; filled during the merge in Section 6
+
+print("Doc 1 columns before:", len(doc1_filtered.columns))
+print("Columns added (Doc 2):", len(doc2.columns))
+print("Doc 1 columns now    :", len(result.columns))
+result.head()
