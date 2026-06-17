@@ -1,14 +1,24 @@
 import pandas as pd
 
-# Edit these four lines:
+# ---- Edit these four lines ----
 file1 = "file1.csv"
 file2 = "file2.csv"
 key1 = "id"           # key column in file 1
 key2 = "customer_id"  # key column in file 2
+# -------------------------------
 
 df1 = pd.read_csv(file1)
 df2 = pd.read_csv(file2)
 
+# Show what the files actually contain, so column names can be confirmed
+print("file1 columns:", list(df1.columns))
+print("file2 columns:", list(df2.columns))
+
+if key1 not in df1.columns:
+    raise SystemExit(f"\n'{key1}' is not a column in {file1}. Pick one of: {list(df1.columns)}")
+if key2 not in df2.columns:
+    raise SystemExit(f"\n'{key2}' is not a column in {file2}. Pick one of: {list(df2.columns)}")
+
 matched = df2[df2[key2].isin(df1[key1])]
 matched.to_csv("matched.csv", index=False)
-print(f"Matched {len(matched)} of {len(df2)} rows")
+print(f"\nMatched {len(matched)} of {len(df2)} rows -> matched.csv")
