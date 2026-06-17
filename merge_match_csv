@@ -182,33 +182,28 @@ result.head()
 
 
 # Section 6 — Fill the Doc 2 columns where the IATA keys match
-import re
 
 doc1_key = "1"   # Doc 1's IATA column
 doc2_key = "6"   # Doc 2's IATA column
 
-# Pull a clean 3-letter IATA code out of a messy value.
-def iata_code(value):
-    text = str(value).upper()
-    # Prefer a standalone 3-letter group (the JFK in "JFK - Kennedy", "(JFK)", etc.)
-    match = re.search(r"\b([A-Z]{3})\b", text)
-    if match:
-        return match.group(1)
-    # Fallback: strip to letters and take the first 3
-    letters = re.sub(r"[^A-Z]", "", text)
-    return letters[:3]
+# Clean a key: trim, uppercase, and turn blanks/nan into truly empty.
+def clean_key(value):
+    text = str(value).strip().upper()
+    if text in ("", "NAN", "NONE", "NULL"):
+        return ""
+    return text
 
 # Standardize the keys on both sides
-result_key = result[doc1_key].map(iata_code)
-doc2_keys  = doc2[doc2_key].map(iata_code)
+result_key = result[doc1_key].map(clean_key)
+doc2_keys  = doc2[doc2_key].map(clean_key)
 
-# Build a lookup from Doc 2: code -> that row (drop blanks, keep first if repeated)
+# Build a lookup from Doc 2: key -> that row (drop blanks, keep first if repeated)
 doc2_lookup = doc2.copy()
 doc2_lookup["_key"] = doc2_keys
 doc2_lookup = doc2_lookup[doc2_lookup["_key"] != ""]
 doc2_lookup = doc2_lookup.drop_duplicates("_key", keep="first").set_index("_key")
 
-# A row matches only if it HAS an IATA and that code exists in Doc 2
+# A row matches only if it HAS a key and that key exists in Doc 2
 has_iata = result_key != ""
 matched  = has_iata & result_key.isin(doc2_lookup.index)
 
