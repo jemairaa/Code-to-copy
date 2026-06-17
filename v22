@@ -12,6 +12,13 @@ print("doc1 columns:", list(df1.columns))
 print("doc2 columns:", list(df2.columns))
 print("doc1 total rows:", len(df1))
 
+# Treat empty strings / whitespace-only cells as "no value" (NaN) in both keys.
+df1[key1] = df1[key1].replace(r"^\s*$", pd.NA, regex=True)
+df2[key2] = df2[key2].replace(r"^\s*$", pd.NA, regex=True)
+
+# Drop doc2 rows with no code, so a blank iata can never match a blank code.
+df2 = df2.dropna(subset=[key2])
+
 # doc2 has the same iata_code repeated many times, which multiplies rows on a join.
 # Keep only the FIRST matching doc2 row per code so each doc1 row maps to one row.
 df2_unique = df2.drop_duplicates(subset=key2, keep="first")
