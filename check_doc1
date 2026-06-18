@@ -6,6 +6,309 @@ Pass 2 (fallback): for rows still unmatched, scan installation_name tokens
                    (split on "*") against every doc1 value, preferring the most
                    reliable column (codes before generic fields).
 
+Output: matched.xlsx with three tabs -> Matched | Needs Review | Summary
+"""
+
+import os
+import pandas as pd
+from rapidfuzz import process
+from rapidfuzz.distance import JaroWinkler
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
+
+# ----------------------------- configuration -----------------------------
+# Folders. Use "" for the current folder, or an absolute path like
+# "/Users/you/Documents/airfields". "~" is expanded to your home folder.
+in_dir = ""                    # folder containing the input CSVs
+out_dir = ""                   # folder where matched.xlsx is written
+
+file1 = "file1.csv"             # doc1: airfield reference table
+file2 = "file2.csv"             # doc2: installations to enrich
+key1 = "iata"                  # key column in doc1
+key2 = "iata_code"             # key column in doc2
+name_col = "installation_name" # doc2 column tokenized on "*"
+
+# Skip rule: don't match rows in the continental US.
+# A row is skipped when its country == us_value AND its state is NOT in keep_states.
+country_col = "country"         # doc2 column holding the country
+state_col = "state"            # doc2 column holding the state
+us_value = "US"                # how the US is written in country_col (e.g. "US" or "USA")
+keep_states = {"HI", "AK"}      # US states that should still be matched
+
+# Columns pulled from doc1 onto matching doc2 rows.
+doc1_cols = ["icao", "geoloc", "airfield_name", "iata", "country_name", "cluster"]
+
+# Columns used for token matching, ordered MOST to LEAST reliable.
+# A token that matches a high-priority column wins over a lower one, so a real
+# code beats a generic value like a country name.
+lookup_cols = ["icao", "iata", "airfield_name", "geoloc", "country_name", "cluster"]
+
+# Treated as "no value" (never a match key), on top of blanks/nulls.
+NULL_VALUES = {"ZZZ", "NULL", "NONE", "NAN", "N/A", "NA", "-", "UNKNOWN"}
+
+# Fuzzy fallback (Pass 3): Jaro-Winkler on installation_name tokens vs every doc1 value.
+# Runs only on rows still unmatched after the two exact passes. All fuzzy matches are
+# flagged needs_review=True because they are best-guesses, not exact.
+enable_fuzzy = True
+fuzzy_threshold = 0.95          # accept a fuzzy match only at >= this similarity (0-1)
+
+out_name = "matched.xlsx"
+# -------------------------------------------------------------------------
+
+# Build full paths from the folders above.
+file1 = os.path.join(os.path.expanduser(in_dir), file1)
+file2 = os.path.join(os.path.expanduser(in_dir), file2)
+out_dir = os.path.expanduser(out_dir)
+if out_dir:
+    os.makedirs(out_dir, exist_ok=True)   # create the output folder if needed
+out_file = os.path.join(out_dir, out_name)
+
+
+def norm_val(v):
+    """Trim + uppercase; return None for blanks, nulls, or placeholder codes."""
+    if pd.isna(v):
+        return None
+    s = str(v).strip().upper()
+    if not s or s in NULL_VALUES:
+        return None
+    return s
+
+
+# ----------------------------- load -----------------------------
+df1 = pd.read_csv(file1, encoding="latin-1", dtype=str)
+df2 = pd.read_csv(file2, encoding="latin-1", dtype=str)
+print("doc2 total rows:", len(df2))
+
+for c in doc1_cols:
+    assert c in df1.columns, f"'{c}' not in doc1. Available: {list(df1.columns)}"
+assert name_col in df2.columns, f"'{name_col}' not in doc2. Available: {list(df2.columns)}"
+
+# ----------------------------- build doc1 lookups -----------------------------
+df1["_k1"] = df1[key1].map(norm_val)
+
+# Direct-match lookup: normalized iata -> doc1 columns (first row per code wins).
+direct_lookup = (
+    df1.dropna(subset=["_k1"])
+       .drop_duplicates("_k1", keep="first")
+       .set_index("_k1")[doc1_cols]
+)
+
+# Reverse dictionary for token matching: value -> (priority, info). Lower priority wins.
+value_dict = {}
+for _, row in df1.iterrows():
+    info = {c: row[c] for c in doc1_cols}
+    for prio, col in enumerate(lookup_cols):
+        v = norm_val(row[col])
+        if v is None:
+            continue
+        if v not in value_dict or prio < value_dict[v][0]:
+            value_dict[v] = (prio, info)
+
+print(f"direct lookup: {len(direct_lookup)} codes | reverse dict: {len(value_dict)} values")
+
+# ----------------------------- Pass 1: vectorized direct match -----------------------------
+df2["_k2"] = df2[key2].map(norm_val)
+matched = df2.merge(direct_lookup, left_on="_k2", right_index=True, how="left")
+matched = matched.sort_index()  # merge can reorder; restore original row order
+
+direct_mask = df2["_k2"].isin(direct_lookup.index).values
+matched["match_source"] = pd.Series(
+    ["iata_code" if m else "none" for m in direct_mask], index=matched.index
+)
+matched["name_matches"] = ""
+matched["needs_review"] = False
+# match_score: 1.0 for exact matches, the Jaro-Winkler value for fuzzy, blank otherwise.
+matched["match_score"] = [1.0 if m else None for m in direct_mask]
+print(f"Pass 1 - direct iata_code matches: {int(direct_mask.sum())}")
+
+# ----------------------------- skip rule: continental US rows -----------------------------
+for c in (country_col, state_col):
+    assert c in matched.columns, f"'{c}' not in doc2. Available: {list(df2.columns)}"
+keep_states_norm = {s.strip().upper() for s in keep_states}
+country_n = matched[country_col].map(norm_val)
+state_n = matched[state_col].map(norm_val)
+skip_mask = (country_n == norm_val(us_value)) & (~state_n.isin(keep_states_norm))
+
+matched.loc[skip_mask, doc1_cols] = None          # remove any doc1 info from skipped rows
+matched.loc[skip_mask, "match_source"] = "SKIP"   # mark the row
+matched.loc[skip_mask, "match_score"] = None
+print(f"Skipped (US, non-HI/AK): {int(skip_mask.sum())}")
+
+# ----------------------------- Pass 2: token fallback (only unmatched rows) -----------------------------
+by_token = 0
+for idx in matched.index[matched["match_source"] == "none"]:
+    raw = matched.at[idx, name_col]
+    if pd.isna(raw):
+        continue
+
+    hits = []          # (priority, order, token, resolved_iata, info)
+    for order, piece in enumerate(str(raw).split("*")):
+        tok = norm_val(piece)
+        if tok and tok in value_dict:
+            prio, info = value_dict[tok]
+            hits.append((prio, order, tok, norm_val(info["iata"]), info))
+
+    if not hits:
+        continue
+
+    best = min(hits, key=lambda h: (h[0], h[1]))   # highest priority, then first seen
+    for c, val in best[4].items():
+        matched.at[idx, c] = val
+    matched.at[idx, "match_source"] = "installation_name"
+    matched.at[idx, "name_matches"] = ", ".join(f"{h[2]}->{h[3]}" for h in hits)
+    matched.at[idx, "match_score"] = 1.0            # exact token match
+    if len({h[3] for h in hits}) > 1:               # name points at >1 airfield
+        matched.at[idx, "needs_review"] = True
+    by_token += 1
+
+print(f"Pass 2 - installation_name matches: {by_token}")
+
+# ----------------------------- Pass 3: fuzzy fallback (Jaro-Winkler) -----------------------------
+fuzzy_n = 0
+if enable_fuzzy:
+    choices = list(value_dict.keys())   # every doc1 value across lookup_cols
+    for idx in matched.index[matched["match_source"] == "none"]:
+        raw = matched.at[idx, name_col]
+        if pd.isna(raw):
+            continue
+
+        # For each token, find its closest doc1 value; keep the best across tokens.
+        best = None   # (score, token, matched_value)
+        for piece in str(raw).split("*"):
+            tok = norm_val(piece)
+            if not tok:
+                continue
+            m = process.extractOne(
+                tok, choices,
+                scorer=JaroWinkler.normalized_similarity,
+                score_cutoff=fuzzy_threshold,
+            )
+            if m and (best is None or m[1] > best[0]):
+                best = (m[1], tok, m[0])
+
+        if best is not None:
+            score, tok, val_key = best
+            info = value_dict[val_key][1]
+            for c, v in info.items():
+                matched.at[idx, c] = v
+            matched.at[idx, "match_source"] = "fuzzy"
+            matched.at[idx, "name_matches"] = f"{tok}~{val_key} ({score:.3f})"
+            matched.at[idx, "match_score"] = round(score, 3)
+            matched.at[idx, "needs_review"] = True   # fuzzy = always verify
+            fuzzy_n += 1
+    print(f"Pass 3 - fuzzy (Jaro-Winkler >= {fuzzy_threshold}) matches: {fuzzy_n}")
+
+matched = matched.drop(columns=["_k2"])
+
+# ----------------------------- split outputs -----------------------------
+review = matched[(matched["needs_review"]) | (matched["match_source"] == "none")].copy()
+
+# ----------------------------- write workbook -----------------------------
+with pd.ExcelWriter(out_file, engine="openpyxl") as xw:
+    matched.to_excel(xw, sheet_name="Matched", index=False)
+    review.to_excel(xw, sheet_name="Needs Review", index=False)
+
+# ----------------------------- formatting + Summary tab -----------------------------
+wb = load_workbook(out_file)
+header_font = Font(name="Arial", bold=True, color="FFFFFF")
+header_fill = PatternFill("solid", start_color="305496")
+body_font = Font(name="Arial")
+
+for ws in (wb["Matched"], wb["Needs Review"]):
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            cell.font = body_font
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    for col_cells in ws.columns:
+        letter = col_cells[0].column_letter
+        width = max((len(str(c.value)) for c in col_cells if c.value is not None), default=10)
+        ws.column_dimensions[letter].width = min(max(width + 2, 10), 45)
+    # Show match_score as a percentage (1.0 -> 100.0%, 0.96 -> 96.0%).
+    if "match_score" in matched.columns:
+        sc = get_column_letter(list(matched.columns).index("match_score") + 1)
+        for cell in ws[sc][1:]:
+            cell.number_format = "0.0%"
+
+# Summary tab: live COUNTIF formulas over the Matched sheet (recalculate on data change).
+ms = wb["Matched"]
+n = ms.max_row
+src_col = get_column_letter(list(matched.columns).index("match_source") + 1)
+rev_col = get_column_letter(list(matched.columns).index("needs_review") + 1)
+src_rng = f"Matched!{src_col}2:{src_col}{n}"
+rev_rng = f"Matched!{rev_col}2:{rev_col}{n}"
+
+s = wb.create_sheet("Summary", 0)   # put first
+rows = [
+    ("Metric", "Value"),
+    ("Total doc2 rows", f"=COUNTA({src_rng})"),
+    ("Skipped (US, non-HI/AK)", f'=COUNTIF({src_rng},"SKIP")'),
+    ("Matched via iata_code", f'=COUNTIF({src_rng},"iata_code")'),
+    ("Matched via installation_name", f'=COUNTIF({src_rng},"installation_name")'),
+    ("Matched via fuzzy (Jaro-Winkler)", f'=COUNTIF({src_rng},"fuzzy")'),
+    ("No match", f'=COUNTIF({src_rng},"none")'),
+    ("Needs review", f"=COUNTIF({rev_rng},TRUE)"),
+    ("Match rate (excl. skipped)",
+     f'=IFERROR((COUNTIF({src_rng},"iata_code")+COUNTIF({src_rng},"installation_name")'
+     f'+COUNTIF({src_rng},"fuzzy"))/(COUNTA({src_rng})-COUNTIF({src_rng},"SKIP")),0)'),
+]
+for r in rows:
+    s.append(r)
+for cell in s[1]:
+    cell.font = header_font
+    cell.fill = header_fill
+for row in s.iter_rows(min_row=2, max_row=s.max_row):
+    for cell in row:
+        cell.font = body_font
+s[f"B{s.max_row}"].number_format = "0.0%"
+s.column_dimensions["A"].width = 32
+s.column_dimensions["B"].width = 16
+
+wb.save(out_file)
+print(f"\nWrote {out_file}: tabs = Summary | Matched | Needs Review")
+print(f"  rows -> Matched: {len(matched)} | Needs Review: {len(review)}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"""
+Enrich doc2 installations with airfield details from doc1.
+
+Pass 1 (fast, vectorized): match doc2.iata_code -> doc1.iata exactly.
+Pass 2 (fallback): for rows still unmatched, scan installation_name tokens
+                   (split on "*") against every doc1 value, preferring the most
+                   reliable column (codes before generic fields).
+
 Output: matched.xlsx with three tabs -> Summary | Matched | Needs Review
 """
 
