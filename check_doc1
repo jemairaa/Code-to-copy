@@ -1,0 +1,92 @@
+import pandas as pd
+
+file1 = "file1.csv"             # <- set to your doc1 filename
+file2 = "file2.csv"             # <- set to your doc2 filename
+key1 = "iata"                  # key column in doc1
+key2 = "iata_code"             # key column in doc2
+name_col = "installation_name" # doc2 column to tokenize on "*" for the fallback match
+
+# Columns to pull from doc1 onto matching doc2 rows:
+doc1_cols = ["icao", "geoloc", "airfield_name", "iata", "country_name", "cluster"]
+
+# Which doc1 columns to build the reverse dictionary from (values used to match tokens).
+# NOTE: "country_name" and "cluster" are generic (e.g. USA, East) and can cause false
+# matches. Remove them from this list if you only want specific identifiers to match.
+lookup_cols = ["icao", "geoloc", "airfield_name", "iata", "country_name", "cluster"]
+
+df1 = pd.read_csv(file1, encoding="latin-1")
+df2 = pd.read_csv(file2, encoding="latin-1")
+
+print("doc1 columns:", list(df1.columns))
+print("doc2 columns:", list(df2.columns))
+print("doc2 total rows:", len(df2))
+
+for c in doc1_cols:
+    if c not in df1.columns:
+        raise SystemExit(f"'{c}' is not in doc1. Available: {list(df1.columns)}")
+if name_col not in df2.columns:
+    raise SystemExit(f"'{name_col}' is not in doc2. Available: {list(df2.columns)}")
+
+
+def norm_val(v):
+    if pd.isna(v):
+        return None
+    s = str(v).strip().upper()
+    return s if s else None
+
+
+# ---- Build doc1 lookups ----
+# 1) primary key lookup (normalized iata) for the direct join
+# 2) reverse dictionary: any value in lookup_cols -> that row's doc1_cols values
+key_lookup = {}      # normalized iata -> dict of doc1_cols
+value_dict = {}      # normalized value from any lookup_col -> dict of doc1_cols
+
+for _, row in df1.iterrows():
+    info = {c: row[c] for c in doc1_cols}
+    k = norm_val(row[key1])
+    if k and k not in key_lookup:
+        key_lookup[k] = info
+    for c in lookup_cols:
+        v = norm_val(row[c])
+        if v and v not in value_dict:   # first occurrence wins
+            value_dict[v] = info
+
+print(f"doc1 key lookup: {len(key_lookup)} codes | reverse dict: {len(value_dict)} values")
+
+# ---- Pass 1: direct iata_code -> iata match ----
+matched = df2.copy()
+for c in doc1_cols:
+    matched[c] = None
+
+direct = 0
+for idx in matched.index:
+    k = norm_val(matched.at[idx, key2])
+    if k and k in key_lookup:
+        for c, val in key_lookup[k].items():
+            matched.at[idx, c] = val
+        direct += 1
+print(f"Direct iata_code matches: {direct}")
+
+# ---- Pass 2: fallback via installation_name tokens against the reverse dictionary ----
+by_token = 0
+for idx in matched.index:
+    if matched.at[idx, doc1_cols[0]] is not None:   # already matched in pass 1
+        continue
+    raw = matched.at[idx, name_col]
+    if pd.isna(raw):
+        continue
+    for tok in str(raw).split("*"):
+        tok = tok.strip().upper()
+        if tok and tok in value_dict:
+            for c, val in value_dict[tok].items():
+                matched.at[idx, c] = val
+            by_token += 1
+            break  # first matching token wins
+
+matched.to_csv("matched.csv", index=False)
+
+n_match = direct + by_token
+print(f"Token (installation_name) matches: {by_token}")
+print(f"\nWrote {len(matched)} rows to matched.csv")
+print(f"  - matched (direct + token): {n_match}")
+print(f"  - still no match:           {len(matched) - n_match}")
