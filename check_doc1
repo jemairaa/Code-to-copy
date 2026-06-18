@@ -6,15 +6,21 @@ Pass 2 (fallback): for rows still unmatched, scan installation_name tokens
                    (split on "*") against every doc1 value, preferring the most
                    reliable column (codes before generic fields).
 
-Output: matched.xlsx with three tabs -> Matched | Needs Review | Summary
+Output: matched.xlsx with three tabs -> Summary | Matched | Needs Review
 """
 
+import os
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
 # ----------------------------- configuration -----------------------------
+# Folders. Use "" for the current folder, or an absolute path like
+# "/Users/you/Documents/airfields". "~" is expanded to your home folder.
+in_dir = ""                    # folder containing the input CSVs
+out_dir = ""                   # folder where matched.xlsx is written
+
 file1 = "file1.csv"             # doc1: airfield reference table
 file2 = "file2.csv"             # doc2: installations to enrich
 key1 = "iata"                  # key column in doc1
@@ -32,8 +38,16 @@ lookup_cols = ["icao", "iata", "airfield_name", "geoloc", "country_name", "clust
 # Treated as "no value" (never a match key), on top of blanks/nulls.
 NULL_VALUES = {"ZZZ", "NULL", "NONE", "NAN", "N/A", "NA", "-", "UNKNOWN"}
 
-out_file = "matched.xlsx"
+out_name = "matched.xlsx"
 # -------------------------------------------------------------------------
+
+# Build full paths from the folders above.
+file1 = os.path.join(os.path.expanduser(in_dir), file1)
+file2 = os.path.join(os.path.expanduser(in_dir), file2)
+out_dir = os.path.expanduser(out_dir)
+if out_dir:
+    os.makedirs(out_dir, exist_ok=True)   # create the output folder if needed
+out_file = os.path.join(out_dir, out_name)
 
 
 def norm_val(v):
